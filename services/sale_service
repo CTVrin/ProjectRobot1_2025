@@ -1,0 +1,74 @@
+from typing import Optional, List
+from models.cart import ShoppingCart
+from models.payment import Payment, PaymentMethod, PaymentStatus
+from models.receipt import Receipt
+from models.product import Product
+from services.inventory_service import InventoryService
+import uuid
+
+
+class SaleService:
+    """销售服务类"""
+
+    def __init__(self, inventory_service: InventoryService):
+        self.inventory_service = inventory_service
+        self.sales_history: List[Receipt] = []
+
+    def create_new_sale(self) -> ShoppingCart:
+        """创建新销售"""
+        return ShoppingCart()
+
+    def add_product_to_sale(self, cart: ShoppingCart, product_id: str, quantity: int = 1) -> bool:
+        """添加商品到销售"""
+        product = self.inventory_service.get_product(product_id)
+        if not product:
+            return False
+
+        # 检查库存
+        if product.stock_quantity < quantity:
+            return False
+
+        # 添加到购物车
+        success = cart.add_item(product, quantity)
+        return success
+
+    def process_payment(self, cart: ShoppingCart, payment_method: PaymentMethod) -> Optional[Receipt]:
+        """处理支付"""
+        if cart.total_quantity == 0:
+            return None
+
+        # 创建支付
+        payment = Payment(
+            payment_id=str(uuid.uuid4()),
+            amount=cart.total_price,
+            method=payment_method
+        )
+
+        # 处理支付
+        if not payment.process_payment():
+            return None
+
+        # 更新库存
+        for item in cart.get_items():
+            self.inventory_service.update_product_stock(
+                item.product.product_id,
+                -item.quantity  # 减少库存
+            )
+
+        # 生成收据
+        receipt = Receipt(
+            receipt_id=str(uuid.uuid4()),
+            cart_items=cart.get_items(),
+            payment=payment,
+            total_amount=cart.total_price,
+            final_amount=cart.total_price
+        )
+
+        # 保存销售记录
+        self.sales_history.append(receipt)
+
+        return receipt
+
+    def get_sales_history(self) -> List[Receipt]:
+        """获取销售历史"""
+        return self.sales_history
